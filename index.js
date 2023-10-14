@@ -66,6 +66,7 @@ mongoose.connect(dbURI, {
 
 
 // POST register
+// POST register
 app.post('/register', async (req, res) => {
   const { username, password } = req.body;
 
@@ -74,6 +75,13 @@ app.post('/register', async (req, res) => {
       username,
       password: bcrypt.hashSync(password, salt),
     });
+
+    // Generate a JWT token for the user
+    const token = jwt.sign({ username, id: userDoc._id }, secret, { expiresIn: '1h' });
+
+    // Save the token to the user document
+    userDoc.token = token;
+    await userDoc.save();
 
     console.log('Created user:', userDoc);
     res.json(userDoc);
@@ -93,15 +101,26 @@ app.post('/login', async (req, res) => {
 
     if (passOk) {
       // logged in
-      jwt.sign({ username, id: userDoc._id }, secret, {}, (err, token) => {
-        if (err) throw err;
 
-        console.log('Generated token:', token);
-        res.cookie('token', token).json({
+      // Get the user's JWT token
+      const token = userDoc.token;
+
+      // Verify the JWT token
+      try {
+        const decodedToken = jwt.verify(token, secret);
+
+        // The user is authenticated
+        // You can now use the user data in your application
+
+        // Return the user's data to the client
+        res.json({
           id: userDoc._id,
           username,
         });
-      });
+      } catch (err) {
+        // The JWT token is invalid
+        return res.status(401).json('Invalid JWT token');
+      }
     } else {
       res.status(400).json('wrong credentials');
     }
@@ -116,12 +135,12 @@ app.get('/profile', async (req, res) => {
   const { token } = req.cookies;
 
   try {
-    const info = jwt.verify(token, secret);
+    const decodedToken = jwt.verify(token, secret);
 
-    // Continue processing with 'info'
+    // Continue processing with 'decodedToken'
 
     // Example: Fetch user data from the database
-    const user = await User.findById(info.id);
+    const user = await User.findById(decodedToken.id);
 
     // Log successful profile retrieval
     console.log(`Profile accessed for user: ${user.username}`);
@@ -139,6 +158,7 @@ app.get('/profile', async (req, res) => {
     res.status(500).json({ message: 'An error occurred' });
   }
 });
+
 
 
 
