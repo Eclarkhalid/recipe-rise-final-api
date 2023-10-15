@@ -29,30 +29,14 @@ const storage = new CloudinaryStorage({
 
 const uploadMiddleware = multer({ storage });
 
-const fsPromises = require('fs').promises; // Import fs.promises
+const fsPromises = require('fs').promises;
 
 const salt = bcrypt.genSaltSync(10);
 const secret = config.get('secretKEY');
 
 app.use(cors({ credentials: true, origin: 'https://recipe-rise-final.vercel.app' }));
-
-const corsOptions = {
-  credentials: true,
-  origin: 'https://recipe-rise-final.vercel.app',
-};
-
-app.options('*', cors(corsOptions));
-
-app.use((err, req, res, next) => {
-  if (err.name === 'CorsError') {
-    res.status(403).json({ message: 'CORS error' });
-  } else {
-    next(err);
-  }
-});
-
-app.use(express.json());
 app.use(cookieParser());
+app.use(express.json());
 app.use('/uploads', express.static(__dirname + '/uploads'));
 
 const dbURI = config.get('mongodbURI');
@@ -72,6 +56,23 @@ app.use(async (req, res, next) => {
     res.status(500).json({ message: 'MongoDB connection error' });
   }
 });
+
+// Error handling middleware for CORS errors
+app.use((err, req, res, next) => {
+  if (err.name === 'CorsError') {
+    res.status(403).json({ message: 'CORS error' });
+  } else {
+    next(err);
+  }
+});
+
+// CORS configuration
+const corsOptions = {
+  credentials: true,
+  origin: 'https://recipe-rise-final.vercel.app',
+};
+
+app.options('*', cors(corsOptions));
 
 // POST register
 app.post('/register', async (req, res) => {
@@ -93,18 +94,25 @@ app.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     const userDoc = await User.findOne({ username });
+
+    if (!userDoc) {
+      return res.status(400).json('User not found');
+    }
+
     const passOk = bcrypt.compareSync(password, userDoc.password);
 
     if (passOk) {
       jwt.sign({ username, id: userDoc._id }, secret, {}, (err, token) => {
-        if (err) throw err;
+        if (err) {
+          throw err;
+        }
         res.cookie('token', token).json({
           id: userDoc._id,
           username,
         });
       });
     } else {
-      res.status(400).json('wrong credentials');
+      res.status(400).json('Wrong credentials');
     }
   } catch (e) {
     console.error('Error logging in user:', e);
