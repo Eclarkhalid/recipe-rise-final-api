@@ -10,13 +10,13 @@ const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const { v2: cloudinary } = require('cloudinary');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
-const config = require('config')
+const config = require('config');
 
 // Configure Cloudinary
 cloudinary.config({
   cloud_name: 'recipe-rise',
   api_key: '887651317989421',
-  api_secret: 'jDEuiOVC7eclQ5rmfA8LmEc4zwo'
+  api_secret: 'jDEuiOVC7eclQ5rmfA8LmEc4zwo',
 });
 
 const storage = new CloudinaryStorage({
@@ -34,15 +34,14 @@ const fsPromises = require('fs').promises; // Import fs.promises
 const salt = bcrypt.genSaltSync(10);
 const secret = config.get('secretKEY');
 
-app.use(cors({ credentials: true, origin: 'https://recipe-rise-final.vercel.app' }));
+app.use(cors({ credentials: true, origin: 'https://recipe-rise-final.vercel.app/' }));
 
 const corsOptions = {
   credentials: true,
-  origin: 'https://recipe-rise-final.vercel.app',
+  origin: 'https://recipe-rise-final.vercel.app/',
 };
 
 app.options('*', cors(corsOptions));
-
 
 app.use((err, req, res, next) => {
   if (err.name === 'CorsError') {
@@ -57,70 +56,53 @@ app.use(cookieParser());
 app.use('/uploads', express.static(__dirname + '/uploads'));
 
 const dbURI = config.get('mongodbURI');
-mongoose.connect(dbURI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
 
-// Rest of your code...
+// Middleware to handle MongoDB connection
+app.use(async (req, res, next) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      await mongoose.connect(dbURI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      });
+    }
+    next();
+  } catch (error) {
+    console.error('MongoDB connection error:', error);
+    res.status(500).json({ message: 'MongoDB connection error' });
+  }
+});
 
-
-// POST register
 // POST register
 app.post('/register', async (req, res) => {
-  const { username, password } = req.body;
-
   try {
+    const { username, password } = req.body;
     const userDoc = await User.create({
       username,
       password: bcrypt.hashSync(password, salt),
     });
-
-    // Generate a JWT token for the user
-    const token = jwt.sign({ username, id: userDoc._id }, secret, { expiresIn: '1h' });
-
-    // Save the token to the user document
-    userDoc.token = token;
-    await userDoc.save();
-
-    console.log('Created user:', userDoc);
     res.json(userDoc);
   } catch (e) {
-    console.error('Error registering user:', e);
+    console.error(e);
     res.status(400).json(e);
   }
 });
 
 // POST login
 app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-
   try {
+    const { username, password } = req.body;
     const userDoc = await User.findOne({ username });
     const passOk = bcrypt.compareSync(password, userDoc.password);
 
     if (passOk) {
-      // logged in
-
-      // Get the user's JWT token
-      const token = userDoc.token;
-
-      // Verify the JWT token
-      try {
-        const decodedToken = jwt.verify(token, secret);
-
-        // The user is authenticated
-        // You can now use the user data in your application
-
-        // Return the user's data to the client
-        res.json({
+      jwt.sign({ username, id: userDoc._id }, secret, {}, (err, token) => {
+        if (err) throw err;
+        res.cookie('token', token).json({
           id: userDoc._id,
           username,
         });
-      } catch (err) {
-        // The JWT token is invalid
-        return res.status(401).json('Invalid JWT token');
-      }
+      });
     } else {
       res.status(400).json('wrong credentials');
     }
@@ -135,31 +117,22 @@ app.get('/profile', async (req, res) => {
   const { token } = req.cookies;
 
   try {
-    const decodedToken = jwt.verify(token, secret);
+    const info = jwt.verify(token, secret);
+    const user = await User.findById(info.id);
 
-    // Continue processing with 'decodedToken'
-
-    // Example: Fetch user data from the database
-    const user = await User.findById(decodedToken.id);
-
-    // Log successful profile retrieval
     console.log(`Profile accessed for user: ${user.username}`);
 
     res.json(info);
   } catch (err) {
     console.error('Error:', err);
 
-    // Handle token verification errors and unauthorized access
     if (err.name === 'JsonWebTokenError') {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Handle other errors
     res.status(500).json({ message: 'An error occurred' });
   }
 });
-
-
 
 
 // GET user profile and posts
@@ -392,7 +365,13 @@ app.get('/post/:id', async (req, res) => {
   const { id } = req.params;
   const postDoc = await Post.findById(id).populate('author', ['username']);
   res.json(postDoc);
-})
+});
+
+// Middleware to close MongoDB connection after processing the request
+app.use((req, res, next) => {
+  mongoose.connection.close();
+  next();
+});
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => {
